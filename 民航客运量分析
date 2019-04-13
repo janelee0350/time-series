@@ -1,0 +1,180 @@
+#2006年1月到2016年9月的国内民航客运量的月度数据(单位:万人/次)
+
+library(TSA)
+library(tseries)
+library(forecast)
+library(astsa)
+library(rugarch)
+library(FinTS)
+library(fGarch)
+
+#1.arima模型拟合
+setwd("C://Rdata")
+data<-read.csv("air transportation.csv",header=T)
+air<-ts(data[1:120,2])
+plot.ts(air)  	 #有趋势和周期性
+air.df<-diff(diff(air),lag=12)
+plot.ts(air.df) 	 #此时已经平稳
+hist(air.df^2)
+
+#stationary
+kpss.test(air.df)
+adf.test(air.df)
+Box.test(air.df)    #平稳且非白噪声
+
+acf2(air.df,max.lag=50)
+
+arima(air,order=c(2,1,1),seasonal=list(order=c(0,1,1),period = 12))
+arima(air,order=c(1,1,1),seasonal=list(order=c(0,1,0),period = 12))
+arima(air,order=c(2,1,1),seasonal=list(order=c(0,1,0),period = 12))  #综合分析选择此模型
+
+auto.arima(air.df)
+result<-arima(air,order=c(2,1,1),seasonal=list(order=c(0,1,0),period=12),include.mean=TRUE,transform.pars=FALSE)
+result$residuals
+Box.test(result$residuals)
+plot(result$residuals^2)   #观察检测异方差性质
+r1=result$residuals
+par(mfrow=c(1,1))
+hist(r1,prob=T,col=0) 
+lines(density(r1),lty=3) 
+x=seq(-50,50,0.01) 
+lines(x,dnorm(x,mean(r1),sqrt(var(r1))),lty=1,col='red') 
+title(main=("r1直方图"),line=0.5) 
+#平稳性
+adf.test(r1)  #H0不平稳，所以平稳
+ArchTest(r1)
+
+qqnorm(r1)
+qqline(r1)  #厚尾
+
+predict<-forecast.Arima(result,h=9,level=c(95))   #9期预测
+predict$mean
+data[121:129,2]
+plot(data[,2],col='blue',type="l")
+lines(120:129,c(air[120],predict$mean),col="red",type="l")
+lines(120:129,c(air[120],predict$lower),col="green",type="l")
+lines(120:129,c(air[120],predict$upper),col="green",type="l")
+
+#2.garch模型拟合
+air<-read.csv("C://Rdata",header=T)
+airts<-ts(air[1:120,2],start=c(2006),freq=12)
+plot(airts)
+airts1<-diff(airts) #一阶差分
+plot(airts1)
+par(mfrow=c(2,1))
+acf(airts1,lag.max=50)
+pacf(airts1,lag.max=50) 
+
+airts2<-diff(airts1,lag=12) #12步差分
+adf.test(airts2)  #平稳性检验
+
+par(mfrow=c(2,1))
+acf(airts2,lag.max=50)
+pacf(airts2,lag.max=50) 
+
+fit1<-arima(airts2,order=c(2,0,1))  #拟合均值模型
+fit1
+y=airts2-fit1$res
+#平稳性
+adf.test(y)  #H0不平稳，所以平稳
+
+#残差平方图
+plot(y^2)
+
+par(mfrow=c(1,1))
+hist(y,prob=T,col=0) 
+lines(density(y),lty=3) 
+x=seq(-40,40,0.01) 
+lines(x,dnorm(x,mean(y),sqrt(var(y))),lty=1,col='red') 
+title(main=("直方图"),line=0.5) 
+
+qqnorm(y)
+qqline(y)  
+#所以厚尾
+#且由图形知可假设正态
+
+ArchTest(y)  #异方差性LM检验
+#故可用异方差模型拟合
+
+
+par(mfrow=c(2,1))
+acf(y)
+pacf(y)
+par(mfrow=c(2,1))
+acf(y^2)
+pacf(y^2) 
+
+##拟合AR（2）~GARCH(1,0)模型
+fit=garchFit(~arma(2,1)+garch(1,0),data=airts2,,cond.dist="norm")
+summary(fit)
+
+##残差检验
+plot(fit)
+res=residuals(fit)
+Box.test(res,lag=1,type="Ljung-Box")  #LB检验
+Box.test(res,lag=2,type="Ljung-Box") 
+Box.test(res,lag=3,type="Ljung-Box") 
+Box.test(res,lag=4,type="Ljung-Box") 
+Box.test(res,lag=5,type="Ljung-Box") 
+#所以是白噪声
+
+##预测
+airts2pre=predict(fit,9,plot=T)
+airts2pre
+
+airts1pre=c(1:128)
+airts1pre1=c(1:128)
+airts1pre2=c(1:128)
+airts1pre[1:119]=airts1
+airts1pre1[1:119]=airts1
+airts1pre2[1:119]=airts1
+for(i in 1:9){
+  airts1pre[119+i]=airts1pre[119-12+i]+airts2pre$meanF[i]
+}
+for(i in 1:9){
+  airts1pre1[119+i]=airts1pre[119-12+i]+airts2pre$up[i]
+}
+for(i in 1:9){
+  airts1pre2[119+i]=airts1pre[119-12+i]+airts2pre$low[i]
+}
+
+airpre=c(1:129)
+airpre1=c(1:129)
+airpre2=c(1:129)
+airpre[1:120]=airts
+airpre1[1:120]=airts
+airpre2[1:120]=airts
+for(i in 1:9){
+  airpre[120+i]=airpre[119+i]+airts1pre[119+i]
+}
+for(i in 1:9){
+  airpre1[120+i]=airpre[119+i]+airts1pre1[119+i]
+}
+for(i in 1:9){
+  airpre2[120+i]=airpre[119+i]+airts1pre2[119+i]
+}
+
+plot.ts(airpre,col='red')
+lines(airpre1,col='green')
+lines(airpre2,col='green')
+lines(air,col='blue')
+#红色预测值，蓝色真实值,绿色为95%置信区间
+
+
+par(mfrow=c(1,1))
+hist(res,prob=T,col=0) 
+lines(density(res),lty=3) 
+x=seq(-40,40,0.01) 
+lines(x,dnorm(x,mean(res),sqrt(var(res))),lty=1,col='red') 
+title(main=("直方图"),line=0.5) 
+
+qqnorm(res)
+qqline(res)  
+#所以厚尾
+#且由图形知可假设正态
+
+
+#均方误差
+s=0
+for(i in 1:9){
+  s=s+(airpre[120+i]-air[120+i,2])^2
